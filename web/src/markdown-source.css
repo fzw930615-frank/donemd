@@ -25,6 +25,8 @@
   --cmd-math-error-bg: rgba(204, 0, 0, 0.09);
   --cmd-scroll-thumb: rgba(0, 0, 0, 0.22);        /* vertical scrollbar thumb */
   --cmd-scroll-thumb-hover: rgba(0, 0, 0, 0.34);  /* … on hover */
+  --cmd-secondary: #6b6b72;    /* 顶栏读数文字（SwiftUI .secondary） */
+  --cmd-tertiary: #a3a3ab;     /* 顶栏分隔点（SwiftUI .tertiary） */
 }
 
 * { box-sizing: border-box; }
@@ -39,8 +41,61 @@ html, body {
   color: var(--cmd-ink);
 }
 
+/* Column flex: the top bar keeps its fixed 28px, the editor takes the rest. */
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 顶栏 — macOS MarkdownSourceTopBar 的页内移植（#82 readout 的载体）。透明、
+   28px 高、内容右对齐，与 Mac 版一致；左侧的 frontmatter 开关首版不移植。 */
+#topbar {
+  flex: none;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 12px;
+  user-select: none;
+}
+
+/* AI 可读性读数：色点（档位信号，不带文字标签）+ ≈tokens + 大白话结论，
+   与 Swift DocumentSizeReadout 逐项对应；体积/字数进 hover tooltip（title）。 */
+#size-readout {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  min-width: 0;
+}
+.cmd-size-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+/* Tier colors — same RGB triples as the Swift readout. */
+.cmd-size-dot.tier-comfortable { background: rgb(51, 183, 89); }   /* 🟢 ≤16K */
+.cmd-size-dot.tier-large { background: rgb(242, 173, 26); }        /* 🟡 16–64K */
+.cmd-size-dot.tier-tooLarge { background: rgb(230, 61, 56); }      /* 🔴 >64K */
+.cmd-size-tokens {
+  font-weight: 500;
+  color: var(--cmd-secondary);
+  white-space: nowrap;
+}
+.cmd-size-sep {
+  color: var(--cmd-tertiary);
+}
+.cmd-size-verdict {
+  color: var(--cmd-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 #source {
-  height: 100vh;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -57,12 +112,12 @@ html, body {
     'JetBrains Mono', Consolas, monospace !important;
   font-size: 13.5px;
   line-height: 1.7;
-  /* Left/right breathing room so source text isn't flush to the pane edge —
-     narrower than the Visual pane's 60px (this is a denser source view).
-     !important: CodeMirror injects its own `.cm-content{padding:4px 0}` at
-     equal specificity, which otherwise wins the cascade (same reason
-     font-family below needs it). */
-  padding: 20px 40px 96px !important;
+  /* Top padding 16px + 顶栏 28px = 44px, aligning the first source line with
+     the Visual pane's first line (its content padding-top is 44px) — the Mac
+     top strip serves the same alignment purpose. !important: CodeMirror
+     injects its own `.cm-content{padding:4px 0}` at equal specificity, which
+     otherwise wins the cascade (same reason font-family needs it). */
+  padding: 16px 40px 96px !important;
   color: var(--cmd-ink);
   -webkit-font-smoothing: antialiased;
 }
@@ -206,6 +261,25 @@ html, body {
 .cmd-md-list    { color: var(--cmd-list); }
 /* Structural punctuation (#, *, >, `, -) dimmed so prose reads first. */
 .cmd-md-mark    { color: var(--cmd-mark); }
+
+/* 标题字号分层 — h1–h6 get distinct sizes so the level reads at a glance,
+   mirroring the Visual pane's scale (1.9rem→0.85rem on 16px prose) but
+   compressed toward the 13.5px mono body: this is still a source view, so
+   the ramp is shallower than prose typography. Whole-line classes come from
+   headingLineField (markdown-source.ts); sizes in em scale the `#` marks
+   together with the text. CodeMirror measures per-line heights, so taller
+   heading lines Just Work with wrap/fold/scroll. */
+.cm-line.cmd-md-h1 { font-size: 1.55em; }
+.cm-line.cmd-md-h2 { font-size: 1.36em; }
+.cm-line.cmd-md-h3 { font-size: 1.2em; }
+.cm-line.cmd-md-h4 { font-size: 1.08em; }
+.cm-line.cmd-md-h5 { font-size: 0.98em; }
+.cm-line.cmd-md-h6 { font-size: 0.9em; }
+/* Weight ramp mirrors Visual (h4+ step down to 600). The weight lives on the
+   highlighted text span (.cmd-md-heading = 700), so override per line level. */
+.cm-line.cmd-md-h4 .cmd-md-heading,
+.cm-line.cmd-md-h5 .cmd-md-heading,
+.cm-line.cmd-md-h6 .cmd-md-heading { font-weight: 600; }
 /* Broken formula (S9 M2): red text + faint red wash + wavy underline, mirroring
    the Visual pane's is-error treatment so a bad `$…$` reads as broken on both
    sides. Overrides syntax color via specificity + !important (the range mark
@@ -238,6 +312,8 @@ html, body {
     --cmd-math-error-bg: rgba(255, 123, 114, 0.13);
     --cmd-scroll-thumb: rgba(255, 255, 255, 0.24);
     --cmd-scroll-thumb-hover: rgba(255, 255, 255, 0.38);
+    --cmd-secondary: #9a9aa2;
+    --cmd-tertiary: #6b6b74;
   }
 }
 
@@ -260,6 +336,8 @@ html, body {
   --cmd-math-error-bg: rgba(192, 57, 43, 0.10);
   --cmd-scroll-thumb: rgba(90, 70, 40, 0.30);       /* warm taupe thumb */
   --cmd-scroll-thumb-hover: rgba(90, 70, 40, 0.44);
+  --cmd-secondary: #8a7d6a;
+  --cmd-tertiary: #b8ac96;
 }
 
 /* 赛博夜色 (night) — deep blue-tinted dark, desaturated CLI palette. Low
@@ -281,4 +359,6 @@ html, body {
   --cmd-math-error-bg: rgba(229, 120, 109, 0.12);
   --cmd-scroll-thumb: rgba(160, 190, 220, 0.26);
   --cmd-scroll-thumb-hover: rgba(160, 190, 220, 0.40);
+  --cmd-secondary: #7d8794;
+  --cmd-tertiary: #5a6473;
 }

@@ -1,0 +1,51 @@
+[package]
+name = "donemd"
+version = "1.0.0"
+description = "Done.md — native Markdown editor (Windows)"
+edition = "2021"
+rust-version = "1.77.2"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[features]
+# 不开此 feature 时 tauri 走 dev 模式:窗口一律加载 devUrl
+# (http://localhost:5173),exe 必须配 vite dev server 才有页面 — 这是
+# 2026-09-22「页面访问有问题」的根因。开了则内嵌 frontendDist
+# (Resources/Web)走 http://tauri.localhost,独立运行。本项目没有
+# tauri CLI,手动构建分两档:
+#   联调/日常(独立运行):cargo build --features custom-protocol
+#   vite 热更开发流:     npm --prefix ../web run dev + cargo build
+# 不放 default:保持 cargo check/test 的编译面与历史一致。
+custom-protocol = ["tauri/custom-protocol"]
+
+[dependencies]
+# `unstable` 为 M3.5 大纲边栏的多 webview API（Window::add_child、
+# Manager::get_webview 等）所必需；Tauri 2 将多 webview 整体置于此
+# feature 下。版本已被 Cargo.lock 固定（2.11.x），升级时留意 API 变动。
+tauri = { version = "2", features = ["unstable"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4"] }
+open = "5"
+tauri-plugin-dialog = "2"
+pulldown-cmark = { version = "0.13", default-features = false, features = ["getopts"] }
+serde_yaml = "0.9"
+# AI milestone: SSE streaming to the providers (default-tls = schannel on
+# Windows — system trust store + system proxy, no OpenSSL), tokio time/sync
+# for the 60s ceiling + cancel signal, keyring for Credential Manager.
+reqwest = { version = "0.12", features = ["json", "stream"] }
+tokio = { version = "1", features = ["rt", "net", "time", "sync", "macros"] }
+futures-util = "0.3"
+# windows-native 必须显式开启——keyring 3 的默认特性不含任何平台后端，
+# 不开则 Entry 落到进程内 mock store（set 成功但随进程退出蒸发）。
+keyring = { version = "3", features = ["windows-native"] }
+
+[profile.release]
+panic = "abort"
+lto = true
+codegen-units = 1
+strip = true
+opt-level = 3

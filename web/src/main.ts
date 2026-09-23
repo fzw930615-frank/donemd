@@ -43,7 +43,7 @@ import { HeadingFold, applyFoldState } from './heading-fold';
 import 'prosemirror-tables/style/tables.css';
 import './visual.css';
 import 'katex/dist/katex.min.css';
-import { on, request, send } from './bridge';
+import { on, request, send, MOD, IS_TAURI, bridgeReady } from './bridge';
 
 // Whether the current selection sits inside a table cell (header or body).
 // Used to forbid headings there: GFM table cells can't encode a heading level
@@ -53,20 +53,25 @@ function selectionInTableCell(editor: Editor): boolean {
   return editor.isActive('tableCell') || editor.isActive('tableHeader');
 }
 
-// --- Heading: replace StarterKit's default Mod-Alt-N with our Mod-Shift-N
-// (matching Notion / Bear / Typora). StarterKit's heading is disabled
-// below so this override wins. Headings inside table cells are refused —
-// returning true swallows the keystroke (no error bell) without applying it.
+// --- Heading: bind Mod-Alt-1..6 (Word / Pages convention; Windows:
+// Ctrl+Alt+1..6). This restores Tiptap StarterKit's own default, which we
+// keep explicit here because StarterKit's heading is disabled below so this
+// override wins (and so the table-cell guard applies). Headings inside table
+// cells are refused — returning true swallows the keystroke (no error bell)
+// without applying it.
 const DonemdHeading = Heading.extend({
   addKeyboardShortcuts() {
-    const toggle = (level: 1 | 2 | 3) => (): boolean => {
+    const toggle = (level: 1 | 2 | 3 | 4 | 5 | 6) => (): boolean => {
       if (selectionInTableCell(this.editor)) return true;
       return this.editor.commands.toggleHeading({ level });
     };
     return {
-      'Mod-Shift-1': toggle(1),
-      'Mod-Shift-2': toggle(2),
-      'Mod-Shift-3': toggle(3),
+      'Mod-Alt-1': toggle(1),
+      'Mod-Alt-2': toggle(2),
+      'Mod-Alt-3': toggle(3),
+      'Mod-Alt-4': toggle(4),
+      'Mod-Alt-5': toggle(5),
+      'Mod-Alt-6': toggle(6),
     };
   },
 });
@@ -350,6 +355,17 @@ on('loadDocument', (payload) => {
   // Flag any broken formulas in the freshly-loaded document (S9 M2) so the
   // source pane red-flags them from the start, not just after the first edit.
   emitBadMath();
+});
+
+// Inbound (Windows/Tauri only): the native side there can't evaluateJavaScript,
+// so saving is a round-trip handshake — it emits `requestDocumentJSON`, we
+// answer with the live Tiptap doc. The same channel carries the 续写 command's
+// whole-document fetch (requestId prefix `ai-doc-`). macOS never sends this,
+// so the handler is inert there.
+on('requestDocumentJSON', (payload) => {
+  const requestId = (payload as { requestId?: string })?.requestId;
+  if (!requestId) return;
+  send('documentJSON', { requestId, doc: editor.getJSON() });
 });
 
 // Inbound: Swift picked an image (Cmd+Shift+I → AssetsManager → here).
@@ -767,7 +783,7 @@ function showSlashInput(
   box.appendChild(field);
   const hint = document.createElement('div');
   hint.className = 'donemd-slash-input__hint';
-  hint.textContent = multiline ? '⌘↩ 发送 · Esc 取消' : '↩ 发送 · Esc 取消';
+  hint.textContent = multiline ? `${MOD}↩ 发送 · Esc 取消` : '↩ 发送 · Esc 取消';
   box.appendChild(hint);
   document.body.appendChild(box);
   slashInputEl = box;
@@ -996,7 +1012,7 @@ on('aiStreamComplete', (payload) => {
     restoreScroll();
     requestAnimationFrame(restoreScroll);
     activeStream = null;
-    const label = mode === 'append' ? '已续写，⌘Z 撤销' : '已生成，⌘Z 撤销';
+    const label = mode === 'append' ? `已续写，${MOD}Z 撤销` : `已生成，${MOD}Z 撤销`;
     const toast = aiToast(label, 'done');
     window.setTimeout(() => { if (toast.classList.contains('donemd-ai-toast--done')) hideAIToast(); }, 5000);
   }
@@ -1108,6 +1124,24 @@ document.addEventListener(
     const target = e.target as HTMLElement;
     if (target.closest('.donemd-inline-diff')) return; // let 还原/保留 work
     keepInlineDiff();
+  },
+  true
+);
+
+// Outline sidebar toggle (Windows shell). The native menu carries 视图 →
+// 文档大纲 on Ctrl+Shift+O, but WebView2 usually swallows accelerators while
+// the webview has focus, so mirror the key through the `menuCommand`
+// envelope (the same escape hatch the file commands use). macOS toggles its
+// own SwiftUI sidebar on ⌃⌘S in AppDelegate; in a plain browser preview this
+// key is a no-op.
+document.addEventListener(
+  'keydown',
+  (e) => {
+    if (!IS_TAURI) return;
+    if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === 'o') {
+      e.preventDefault();
+      send('menuCommand', { command: 'toggleOutline' });
+    }
   },
   true
 );
@@ -1376,6 +1410,8 @@ editor.on('update', () => {
   });
 });
 
-// Outbound: signal Swift that the editor is mounted and ready to receive
-// the document. Swift's bridge handler responds with `loadDocument`.
-send('editorReady');
+// Outbound: signal the native side that the editor is mounted and ready to
+// receive the document; it responds with `loadDocument`. Await the bridge
+// listener registration first (see bridgeReady) so the reply can't be
+// dropped on a fast page load.
+void bridgeReady.then(() => send('editorReady'));

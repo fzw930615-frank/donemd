@@ -1,0 +1,355 @@
+/* AI 设置 — same canvas contract as the editor: the page is transparent and
+ * the native window paints the theme color behind it (theme.rs). Text colors
+ * follow `prefers-color-scheme`, which WebView2 keeps in sync with the OS.
+ * Two top-level tabs (AI / 飞书同步) share this window. */
+
+/* `light dark` tells the UA "either is fine" and WebView2 may keep native
+ * widgets (select, details marker, scrollbars) light. Pin a single scheme
+ * per media query so UA-rendered controls lock to the active theme. */
+:root {
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+  }
+}
+
+html,
+body {
+  background: transparent;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+}
+
+#app {
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 20px 24px 32px;
+}
+
+section {
+  margin-bottom: 22px;
+}
+
+/* 顶层分段 tab — macOS 设置工具栏分段控件对应物 */
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin: -4px 0 18px;
+  border-bottom: 1px solid rgba(127, 127, 127, 0.25);
+}
+
+.tab {
+  border: 0;
+  background: none;
+  border-radius: 6px 6px 0 0;
+  padding: 6px 14px;
+  color: #86868b;
+  font-weight: 500;
+}
+
+.tab:hover {
+  background: rgba(127, 127, 127, 0.08);
+}
+
+.tab.active {
+  color: inherit;
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 #0a84ff;
+}
+
+h2 {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #86868b;
+  margin: 0 0 8px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.row label {
+  flex-shrink: 0;
+}
+
+.caption {
+  font-size: 11px;
+  color: #86868b;
+  margin: 6px 0 0;
+}
+
+select,
+input[type='text'],
+input[type='password'] {
+  font: inherit;
+  color: inherit;
+  background: rgba(127, 127, 127, 0.08);
+  border: 1px solid rgba(127, 127, 127, 0.3);
+  border-radius: 6px;
+  padding: 4px 8px;
+  min-width: 0;
+}
+
+/* Custom select (native <select> popups ignore page theming in WebView2) */
+.xselect {
+  position: relative;
+  display: inline-block;
+  min-width: 200px;
+}
+
+.xselect-face {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  background: rgba(127, 127, 127, 0.08);
+  border: 1px solid rgba(127, 127, 127, 0.3);
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.xselect-face:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Fixed-positioned + sized by createSelect (select-pop-layout.ts): the
+   provider cards clip overflow (rounded corners), so an in-flow absolute
+   popup gets cut off at the card border and long model lists become
+   unreachable. */
+.xselect-pop {
+  position: fixed;
+  z-index: 30;
+  max-height: 240px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  padding: 4px;
+}
+
+.xselect-opt {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  padding: 5px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.xselect-opt:hover {
+  background: rgba(10, 132, 255, 0.18);
+}
+
+.xselect-opt.selected {
+  font-weight: 600;
+}
+
+.xselect-opt.selected::after {
+  content: ' ✓';
+  color: #0a84ff;
+}
+
+.card {
+  border: 1px solid rgba(127, 127, 127, 0.25);
+  border-radius: 10px;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.card-header:hover {
+  background: rgba(127, 127, 127, 0.08);
+}
+
+.card-name {
+  font-weight: 600;
+}
+
+.pill {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(10, 132, 255, 0.15);
+  color: #0a84ff;
+}
+
+.pill.muted {
+  background: rgba(127, 127, 127, 0.15);
+  color: #86868b;
+}
+
+.configured {
+  font-size: 11px;
+  color: #30d158;
+}
+
+.chevron {
+  color: #86868b;
+  font-size: 11px;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.card-body {
+  padding: 4px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.field-name {
+  font-size: 11px;
+  color: #86868b;
+}
+
+/* 重定向 URL 行:输入框 + 复制按钮 */
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.field-row input {
+  flex: 1;
+}
+
+details summary {
+  cursor: pointer;
+  color: #86868b;
+  font-size: 12px;
+  padding: 4px 2px;
+  border-radius: 4px;
+}
+
+details summary:hover {
+  background: rgba(127, 127, 127, 0.08);
+}
+
+details input {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 6px;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+button {
+  font: inherit;
+  border-radius: 6px;
+  border: 1px solid rgba(127, 127, 127, 0.35);
+  background: rgba(127, 127, 127, 0.1);
+  color: inherit;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+
+button.primary {
+  background: #0a84ff;
+  border-color: #0a84ff;
+  color: #fff;
+}
+
+button.primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+button.link {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: #0a84ff;
+  font-size: 12px;
+}
+
+button.link.danger {
+  color: #ff453a;
+}
+
+button.link:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.status {
+  font-size: 11px;
+  color: #86868b;
+  margin: 0;
+}
+
+.status.error {
+  color: #ff453a;
+}
+
+.status.ok {
+  color: #30d158;
+}
+
+.status-url {
+  word-break: break-all;
+  opacity: 0.8;
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    color: #f5f5f7;
+  }
+
+  .xselect-pop {
+    background: #2c2c2e;
+    border-color: rgba(255, 255, 255, 0.14);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  }
+}

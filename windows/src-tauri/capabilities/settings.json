@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "settings",
+  "description": "AI 设置 window — invokes the ai_settings_* commands only",
+  "windows": ["settings"],
+  "permissions": ["core:default"]
+}

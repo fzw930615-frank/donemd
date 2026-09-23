@@ -1,8 +1,13 @@
 import type { Editor } from '@tiptap/core';
+import { ALT, MOD } from './bridge';
 
 /**
- * Phase 2 selection bubble menu — 11 actions in three groups:
+ * Phase 2 selection bubble menu — a heading-level picker plus 11 actions in
+ * three groups:
  *
+ *   heading     [正文 ▾] — echoes the cursor block's level (正文/H1…H6) and
+ *               opens a near-cursor popup to pick a level (click path for
+ *               the Mod-Alt-0..6 shortcuts)
  *   format      [B] [I] [S̶] [</>] [🔗]
  *   block       [清除] [引用] [代码块] [无序] [有序]
  *   container   [高亮块]
@@ -36,35 +41,35 @@ const FORMAT_BUTTONS: BubbleButton[] = [
   {
     cmd: 'bold',
     label: 'B',
-    tooltip: '加粗 (Cmd+B)',
+    tooltip: `加粗 (${MOD}B)`,
     action: (e) => e.chain().focus().toggleBold().run(),
     isActive: (e) => e.isActive('bold'),
   },
   {
     cmd: 'italic',
     label: 'I',
-    tooltip: '斜体 (Cmd+I)',
+    tooltip: `斜体 (${MOD}I)`,
     action: (e) => e.chain().focus().toggleItalic().run(),
     isActive: (e) => e.isActive('italic'),
   },
   {
     cmd: 'strike',
     label: 'S̶',
-    tooltip: '删除线 (Cmd+Shift+X)',
+    tooltip: `删除线 (${MOD}Shift+X)`,
     action: (e) => e.chain().focus().toggleStrike().run(),
     isActive: (e) => e.isActive('strike'),
   },
   {
     cmd: 'code',
     label: '</>',
-    tooltip: '行内代码 (Cmd+E)',
+    tooltip: `行内代码 (${MOD}E)`,
     action: (e) => e.chain().focus().toggleCode().run(),
     isActive: (e) => e.isActive('code'),
   },
   {
     cmd: 'link',
     label: '🔗',
-    tooltip: '链接 (Cmd+K)',
+    tooltip: `链接 (${MOD}K)`,
     // Wired by attach() — needs access to the link prompt helper.
     action: () => {},
     isActive: (e) => e.isActive('link'),
@@ -75,20 +80,20 @@ const BLOCK_BUTTONS: BubbleButton[] = [
   {
     cmd: 'clear',
     label: '清除',
-    tooltip: '清除格式 (Cmd+\\)',
+    tooltip: `清除格式 (${MOD}\\)`,
     action: (e) => e.chain().focus().clearNodes().unsetAllMarks().run(),
   },
   {
     cmd: 'blockquote',
     label: '引用',
-    tooltip: '引用 (Cmd+Shift+B)',
+    tooltip: `引用 (${MOD}Shift+B)`,
     action: (e) => e.chain().focus().toggleBlockquote().run(),
     isActive: (e) => e.isActive('blockquote'),
   },
   {
     cmd: 'codeBlock',
     label: '代码块',
-    tooltip: '代码块 (Cmd+Option+C)',
+    tooltip: `代码块 (${MOD}${ALT}C)`,
     // Merge-aware: a multi-line selection becomes ONE code block, not one per
     // paragraph (see setMergedCodeBlock in mermaid-codeblock.ts).
     action: (e) => e.chain().focus().setMergedCodeBlock().run(),
@@ -97,14 +102,14 @@ const BLOCK_BUTTONS: BubbleButton[] = [
   {
     cmd: 'bulletList',
     label: '无序',
-    tooltip: '无序列表 (Cmd+Shift+8)',
+    tooltip: `无序列表 (${MOD}Shift+8)`,
     action: (e) => e.chain().focus().toggleBulletList().run(),
     isActive: (e) => e.isActive('bulletList'),
   },
   {
     cmd: 'orderedList',
     label: '有序',
-    tooltip: '有序列表 (Cmd+Shift+7)',
+    tooltip: `有序列表 (${MOD}Shift+7)`,
     action: (e) => e.chain().focus().toggleOrderedList().run(),
     isActive: (e) => e.isActive('orderedList'),
   },
@@ -134,7 +139,54 @@ const CONTAINER_BUTTONS: BubbleButton[] = [
   },
 ];
 
-const ALL_BUTTONS = [...FORMAT_BUTTONS, ...BLOCK_BUTTONS, ...CONTAINER_BUTTONS];
+// --- 标题级别 (heading levels) ----------------------------------------------
+// 正文 + 一级…六级标题. Shared by THREE entry points so they can never drift:
+// the floater's heading dropdown (mouse), the native 格式 menu (fmt:headingN
+// → formatCommand → runFormatCommand), and the Mod-Alt-0..6 keymap (main.ts).
+interface HeadingChoice {
+  cmd: string;
+  label: string;
+  /** Short button label shown when the cursor sits on this level. */
+  short: string;
+  shortcut: string;
+  level: 0 | 1 | 2 | 3 | 4 | 5 | 6; // 0 = 正文
+}
+
+const HEADING_CHOICES: HeadingChoice[] = [
+  { cmd: 'paragraph', label: '正文', short: '正文', shortcut: `${MOD}${ALT}0`, level: 0 },
+  { cmd: 'heading1', label: '一级标题', short: 'H1', shortcut: `${MOD}${ALT}1`, level: 1 },
+  { cmd: 'heading2', label: '二级标题', short: 'H2', shortcut: `${MOD}${ALT}2`, level: 2 },
+  { cmd: 'heading3', label: '三级标题', short: 'H3', shortcut: `${MOD}${ALT}3`, level: 3 },
+  { cmd: 'heading4', label: '四级标题', short: 'H4', shortcut: `${MOD}${ALT}4`, level: 4 },
+  { cmd: 'heading5', label: '五级标题', short: 'H5', shortcut: `${MOD}${ALT}5`, level: 5 },
+  { cmd: 'heading6', label: '六级标题', short: 'H6', shortcut: `${MOD}${ALT}6`, level: 6 },
+];
+
+function headingAction(editor: Editor, level: HeadingChoice['level']): void {
+  // Same table-cell refusal as the keyboard path (#76: GFM table cells can't
+  // carry a heading level — converting here would silently revert on save).
+  if (editor.isActive('tableCell') || editor.isActive('tableHeader')) return;
+  if (level === 0) editor.chain().focus().setParagraph().run();
+  else editor.chain().focus().toggleHeading({ level }).run();
+}
+
+// Not rendered as standalone floater buttons (the picker below is their UI);
+// they exist so runFormatCommand can resolve the 格式 menu's fmt:headingN.
+const HEADING_BUTTONS: BubbleButton[] = HEADING_CHOICES.map((c) => ({
+  cmd: c.cmd,
+  label: c.label,
+  tooltip: `${c.label} (${c.shortcut})`,
+  action: (e) => headingAction(e, c.level),
+  isActive: (e) =>
+    c.level === 0 ? e.isActive('paragraph') : e.isActive('heading', { level: c.level }),
+}));
+
+const ALL_BUTTONS = [
+  ...HEADING_BUTTONS,
+  ...FORMAT_BUTTONS,
+  ...BLOCK_BUTTONS,
+  ...CONTAINER_BUTTONS,
+];
 
 /** Run a format command by its `cmd` name — the SAME action the bubble button
  *  would run. This is the single source of truth shared by two entry points:
@@ -277,6 +329,42 @@ export function createBubbleMenu(): BubbleHandle {
     root.appendChild(divider);
   };
 
+  // 标题级别 picker — first control in the bubble. The button echoes the
+  // cursor block's current level (正文 / H1…H6, refreshed in attach());
+  // clicking it opens a near-cursor popup listing every level with its
+  // shortcut hint. This is the mouse path for Mod-Alt-0..6.
+  const headingBtn = document.createElement('button');
+  headingBtn.type = 'button';
+  headingBtn.className = 'donemd-bubble__btn donemd-bubble__heading';
+  headingBtn.textContent = '正文 ▾';
+  headingBtn.title = '标题级别';
+  headingBtn.setAttribute('aria-label', '标题级别');
+  headingBtn.setAttribute('aria-haspopup', 'true');
+  headingBtn.addEventListener('mousedown', (e) => e.preventDefault());
+
+  const headingMenu = document.createElement('div');
+  headingMenu.className = 'donemd-bubble__ai-menu donemd-bubble__heading-menu';
+  headingMenu.style.display = 'none';
+  for (const c of HEADING_CHOICES) {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'donemd-bubble__ai-item donemd-bubble__heading-item';
+    item.dataset.cmd = c.cmd;
+    const name = document.createElement('span');
+    name.textContent = c.label;
+    const kbd = document.createElement('span');
+    kbd.className = 'donemd-bubble__kbd';
+    kbd.textContent = c.shortcut;
+    kbd.setAttribute('aria-hidden', 'true');
+    item.appendChild(name);
+    item.appendChild(kbd);
+    item.addEventListener('mousedown', (e) => e.preventDefault());
+    headingMenu.appendChild(item);
+  }
+
+  root.appendChild(headingBtn);
+  root.appendChild(headingMenu);
+  addDivider();
   buildGroup(FORMAT_BUTTONS);
   addDivider();
   buildGroup(BLOCK_BUTTONS);
@@ -329,7 +417,7 @@ export function createBubbleMenu(): BubbleHandle {
   // not this full 13-command floater; badging each would mislead.
   const aiHint = document.createElement('div');
   aiHint.className = 'donemd-bubble__ai-hint';
-  aiHint.textContent = '⌘/ 用键盘唤起';
+  aiHint.textContent = `${MOD}/ 用键盘唤起`;
   aiHint.setAttribute('aria-hidden', 'true');
   aiMenu.appendChild(aiHint);
 
@@ -419,6 +507,7 @@ export function createBubbleMenu(): BubbleHandle {
 
       aiButton.addEventListener('click', (e) => {
         e.preventDefault();
+        headingMenu.style.display = 'none';
         if (aiMenu.style.display === 'none') {
           aiSub.style.display = 'none';
           aiSub.replaceChildren();
@@ -427,6 +516,30 @@ export function createBubbleMenu(): BubbleHandle {
           closeAIMenu();
         }
       });
+
+      // 标题级别 picker: click the button to toggle the popup (closing the AI
+      // menu so the two never stack); click a row to apply that level to the
+      // cursor block(s) via the shared action map.
+      const closeHeadingMenu = () => {
+        headingMenu.style.display = 'none';
+      };
+      headingBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        closeAIMenu();
+        headingMenu.style.display =
+          headingMenu.style.display === 'none' ? 'flex' : 'none';
+      });
+      const headingItems = Array.from(
+        headingMenu.querySelectorAll('.donemd-bubble__heading-item')
+      ) as HTMLButtonElement[];
+      for (const item of headingItems) {
+        item.addEventListener('click', (e) => {
+          e.preventDefault();
+          closeHeadingMenu();
+          runFormatCommand(editor, item.dataset.cmd ?? 'paragraph', insertLink);
+        });
+      }
+      editor.on('selectionUpdate', closeHeadingMenu);
 
       for (const item of Array.from(aiMenu.querySelectorAll('.donemd-bubble__ai-item')) as HTMLButtonElement[]) {
         // Skip the language chips inside aiSub (wired in showLanguagePopover).
@@ -456,13 +569,23 @@ export function createBubbleMenu(): BubbleHandle {
       }
 
       // Highlight buttons whose mark / node is currently active so users
-      // see the toggle state at a glance.
+      // see the toggle state at a glance. The heading picker additionally
+      // echoes the cursor block's level on its button (正文 / H1…H6) and
+      // marks the matching popup row.
       const refresh = (): void => {
         for (const b of ALL_BUTTONS) {
           const el = buttonRefs.get(b.cmd);
           if (!el) continue;
           const active = b.isActive ? b.isActive(editor) : false;
           el.classList.toggle('is-active', active);
+        }
+        const current =
+          HEADING_CHOICES.find(
+            (c) => c.level > 0 && editor.isActive('heading', { level: c.level })
+          ) ?? HEADING_CHOICES[0]; // 正文 fallback
+        headingBtn.textContent = `${current.short} ▾`;
+        for (const item of headingItems) {
+          item.classList.toggle('is-active', item.dataset.cmd === current.cmd);
         }
       };
       editor.on('selectionUpdate', refresh);

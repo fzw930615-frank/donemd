@@ -1,0 +1,55 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Done.md",
+  "version": "1.0.0",
+  "identifier": "com.shampoo.donemd",
+  "build": {
+    "beforeDevCommand": "npm --prefix ../web run dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "npm --prefix ../web run build",
+    "frontendDist": "../../Resources/Web"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Done.md",
+        "url": "visual.html",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 640,
+        "minHeight": 480,
+        "dragDropEnabled": false,
+        "transparent": false
+      }
+    ],
+    "security": {
+      "dangerousDisableAssetCspModification": true,
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http://donemd-asset.localhost; font-src 'self' data:; media-src 'self' blob: http://donemd-asset.localhost; connect-src 'self' ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi", "nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "publisher": "Done.md",
+    "category": "Productivity",
+    "shortDescription": "Native Markdown editor",
+    "longDescription": "Done.md — a native Markdown editor with visual editing, Mermaid diagrams, KaTeX math, AI commands and Feishu sync.",
+    "fileAssociations": [
+      {
+        "ext": ["md", "markdown"],
+        "name": "Markdown Document",
+        "description": "Markdown document",
+        "role": "Editor"
+      }
+    ]
+  }
+}

@@ -1,0 +1,46 @@
+### Rust / Tauri（Windows 版构建产物）
+# cargo 的 target 有数百 MB,含 20 MB 的 donemd.exe — 绝不入库。
+**/target/
+
+### Node
+node_modules/
+
+### Tauri 生成物
+# gen/schemas 由 tauri-build 每次生成(与上游 src-tauri 模板的忽略项一致)。
+windows/src-tauri/gen/schemas/
+
+### 大体积手工测试素材
+# M4 视频验收用的 10 MB clip.mp4 —— git 历史是永久的,二进制素材不入库;
+# 需要时把文件放回 tasks/m4-video-test/assets/ 即可(验收步骤见 tasks/todo.md M4)。
+tasks/m4-video-test/assets/
+
+### Web 构建产物
+# Resources/Web 是**占位目录**(只跟踪 .gitkeep),产物由 `npm --prefix web run build`
+# 生成;Tauri 的 frontendDist 与 Xcode 都从这里取,但它是派生物不是源码。
+Resources/Web/*
+!Resources/Web/.gitkeep
+
+### 本地工具配置
+# Kiro agent 的本机偏好(工具搜索阈值等),与 .vscode/ 同类,不入共享库。
+.kiro/
+
+### macOS
+.DS_Store
+
+### Xcode 用户态
+xcuserdata/
+*.xcuserdatadir
+*.xcodeproj
+
+### Windows
+# Windows thumbnail cache files
+Thumbs.db
+
+# Folder config file
+[Dd]esktop.ini
+
+# Recycle Bin used on file shares
+$RECYCLE.BIN/
+
+# Windows shortcuts
+*.lnk

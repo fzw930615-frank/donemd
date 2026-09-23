@@ -14,6 +14,7 @@ import { Extension } from '@tiptap/core';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import { aiStreamingKey } from './ai-streaming';
+import { MOD } from './bridge';
 
 export const aiHintKey = new PluginKey('aiHint');
 
@@ -38,7 +39,7 @@ function shouldShowHint(state: import('@tiptap/pm/state').EditorState): boolean 
 function buildHint(): HTMLElement {
   const el = document.createElement('span');
   el.className = 'donemd-ai-hint';
-  el.textContent = '⌘/ 唤起 AI';
+  el.textContent = `${MOD}/ 唤起 AI`;
   // Never let the placeholder interfere with clicks / caret placement.
   el.contentEditable = 'false';
   return el;

@@ -14,7 +14,27 @@ import {
 } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
 import './markdown-source.css';
-import { on, send } from './bridge';
+import { bridgeReady, on, send } from './bridge';
+import { bytesReadable, charactersReadable, estimateDocSize, TIER_VERDICT, tokensCompact } from './doc-size';
+
+// 顶栏 AI 可读性读数（#82 — macOS DocumentSizeReadout 的页内移植；Windows 壳
+// 没有原生顶栏，读数活在页面里，从本栏每次 setMarkdownSource 收到的 markdown
+// 直接计算，无需原生回传）。色点带档位强度、句子带结论；体积/字数在 tooltip。
+const sizeReadout = document.getElementById('size-readout')!;
+const sizeDot = document.getElementById('size-dot')!;
+const sizeTokens = document.getElementById('size-tokens')!;
+const sizeVerdict = document.getElementById('size-verdict')!;
+
+function updateSizeReadout(bodyMarkdown: string) {
+  const est = estimateDocSize(bodyMarkdown);
+  const verdict = TIER_VERDICT[est.tier];
+  const tokens = tokensCompact(est.tokens);
+  sizeDot.className = `cmd-size-dot tier-${est.tier}`;
+  sizeTokens.textContent = tokens;
+  sizeVerdict.textContent = verdict;
+  // Mirrors the Swift .help tooltip, line for line.
+  sizeReadout.title = `${verdict}\n${tokens}（估算，按中英文加权）\n体积 ${bytesReadable(est.bytes)} · ${charactersReadable(est.chars)}`;
+}
 
 // Markdown syntax coloring for the source pane (Phase 5 S3 / #75). We assign
 // CSS CLASS NAMES per lezer tag (not inline colors) so the actual palette
@@ -85,6 +105,37 @@ const badMathField = StateField.define<DecorationSet>({
       // Doc was replaced (source refresh) — recompute against the new text.
       return computeBadMathDecorations(tr.state.doc.toString(), currentBadMath);
     }
+    return deco.map(tr.changes);
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
+
+// 标题字号分层 (heading size hierarchy). The Visual pane scales h1–h6 from
+// 1.9rem down to 0.85rem; the mirror keeps its monospace stack but scales the
+// whole heading LINE so the level reads at a glance on this side too. Line
+// decorations (not per-span highlight) so the `#` marks and the text scale
+// together and stay baseline-aligned. Recomputed from the same fence-aware
+// scanHeadings the fold logic uses — headings inside ``` / ~~~ stay body-size.
+const headingLineDeco = [1, 2, 3, 4, 5, 6].map((level) =>
+  Decoration.line({ class: `cmd-md-h${level}` })
+);
+
+function headingLineDecorations(doc: import('@codemirror/state').Text): DecorationSet {
+  const headings = scanHeadings(doc);
+  if (headings.length === 0) return Decoration.none;
+  // scanHeadings returns in document order — already ascending for RangeSet.
+  return Decoration.set(
+    headings.map((h) => headingLineDeco[h.level - 1].range(doc.line(h.lineNo).from)),
+    true
+  );
+}
+
+const headingLineField = StateField.define<DecorationSet>({
+  create(state) {
+    return headingLineDecorations(state.doc);
+  },
+  update(deco, tr) {
+    if (tr.docChanged) return headingLineDecorations(tr.state.doc);
     return deco.map(tr.changes);
   },
   provide: (f) => EditorView.decorations.from(f),
@@ -275,6 +326,8 @@ const view = new EditorView({
       // Broken-formula red-flagging (S9 M2). Holds decorations for LaTeX the
       // Visual pane reported as unrenderable.
       badMathField,
+      // Heading size hierarchy (h1–h6 line classes; sizes in the CSS).
+      headingLineField,
       // 标题折叠 (heading fold): fold the region under a heading. codeFolding()
       // provides the fold state + hidden-range decorations; basicSetup already
       // installs ONE foldGutter() (a second, hand-added one produced a duplicate
@@ -391,6 +444,8 @@ on('setMarkdownSource', (payload) => {
   // Re-fold placeholder blocks into chips (view.state already reflects the new
   // doc — dispatch is synchronous).
   foldPlaceholders();
+  // 顶栏读数跟随每次推送（对齐 Mac：recomputed on every push）。
+  updateSizeReadout(text);
 });
 
 // Broken-formula list from the Visual pane (S9 M2). Dispatch it as a StateEffect
@@ -468,6 +523,8 @@ on('applyFold', (payload) => {
   }
 });
 
-// Outbound: tell Swift this pane's editor is ready to receive the initial
-// Markdown source (Swift's handler then triggers the first push).
-send('editorReady');
+// Outbound: tell the native side this pane's editor is ready to receive the
+// initial Markdown source (its handler then triggers the first push). Await
+// the bridge listener registration first (see bridgeReady) so the reply
+// can't be dropped on a fast page load.
+void bridgeReady.then(() => send('editorReady'));

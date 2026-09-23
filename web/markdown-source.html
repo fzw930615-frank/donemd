@@ -6,6 +6,14 @@
     <title>Done.md — Markdown 源</title>
   </head>
   <body>
+    <!-- 顶栏：macOS MarkdownSourceTopBar 的页内移植（Windows 壳没有原生
+         SwiftUI 条）。目前只有右侧的 AI 可读性读数（#82）；Mac 左侧的
+         frontmatter 开关首版不移植。 -->
+    <header id="topbar">
+      <span id="size-readout">
+        <span class="cmd-size-dot" id="size-dot"></span><span class="cmd-size-tokens" id="size-tokens"></span><span class="cmd-size-sep">·</span><span class="cmd-size-verdict" id="size-verdict"></span>
+      </span>
+    </header>
     <div id="source"></div>
     <script type="module" src="/src/markdown-source.ts"></script>
   </body>

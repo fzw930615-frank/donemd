@@ -1,0 +1,122 @@
+/* 文档大纲边栏 — Windows (Tauri) outline pane. Same canvas contract as the
+ * editor and AI settings: the page is transparent and the native side paints
+ * the theme color behind it (theme.rs). Text colors follow
+ * `prefers-color-scheme`, which WebView2 keeps in sync with the OS. */
+
+/* Pin a single scheme per media query — `light dark` leaves WebView2's
+ * UA-rendered widgets (scrollbars…) stuck light on a dark page. */
+:root {
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+  }
+}
+
+html,
+body {
+  background: transparent;
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  font-family: system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  /* A sidebar is not a text surface — selecting row labels only fights
+   * click-through to the editor. */
+  user-select: none;
+}
+
+#outline {
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 8px 6px;
+  box-sizing: border-box;
+}
+
+.outline-empty {
+  padding: 12px 10px;
+  color: #86868b;
+  font-size: 12px;
+}
+
+.outline-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.outline-row {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  padding: 4px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.outline-row:hover {
+  background: rgba(127, 127, 127, 0.12);
+}
+
+.outline-row.active {
+  background: rgba(10, 132, 255, 0.18);
+  color: #0a84ff;
+}
+
+/* Level weighting mirrors macOS OutlineSidebar: H1 semibold, H2 regular,
+ * deeper levels smaller and dimmer. Indent itself is inline (per-row
+ * paddingLeft) since it's a function of the exact level. */
+.outline-l1 {
+  font-weight: 600;
+}
+
+.outline-l3,
+.outline-l4,
+.outline-l5,
+.outline-l6 {
+  font-size: 12px;
+  color: #6e6e73;
+}
+
+.outline-l3.active,
+.outline-l4.active,
+.outline-l5.active,
+.outline-l6.active {
+  color: #0a84ff;
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    color: #f5f5f7;
+  }
+
+  .outline-l3,
+  .outline-l4,
+  .outline-l5,
+  .outline-l6 {
+    color: #98989d;
+  }
+
+  .outline-l3.active,
+  .outline-l4.active,
+  .outline-l5.active,
+  .outline-l6.active {
+    color: #0a84ff;
+  }
+}

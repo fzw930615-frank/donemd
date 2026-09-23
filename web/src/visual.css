@@ -1597,6 +1597,7 @@ body.donemd-slash-open .donemd-bubble {
 
 /* Bubble menu "AI ▾" button + dropdown. */
 .donemd-bubble__ai { font-weight: 600; }
+.donemd-bubble__heading { font-weight: 600; }
 .donemd-bubble__ai-menu {
   position: absolute;
   top: 100%;
@@ -1621,6 +1622,35 @@ body.donemd-slash-open .donemd-bubble {
   font-size: 13px;
 }
 .donemd-bubble__ai-item:hover { background: rgba(255, 255, 255, 0.12); }
+
+/* Currently-applied row in a dropdown (heading-level picker): the .is-active
+   class is shared with the toolbar buttons' toggle state. */
+.donemd-bubble__ai-item.is-active {
+  background: rgba(10, 132, 255, 0.5);
+  color: #ffffff;
+}
+
+/* 标题级别 picker popup — the menu opens under the LEFT edge of the bubble
+   (the button is the first control), rows are label + right-aligned shortcut
+   hint. */
+.donemd-bubble__heading-menu {
+  left: 0;
+  min-width: 168px;
+}
+.donemd-bubble__heading-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.donemd-bubble__kbd {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.4);
+  white-space: nowrap;
+}
+.donemd-bubble__ai-item.is-active .donemd-bubble__kbd {
+  color: rgba(255, 255, 255, 0.75);
+}
 
 /* Grouped dropdown (S4 #65): a faint title per group, hairline separators. */
 .donemd-bubble__ai-group {
