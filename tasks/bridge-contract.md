@@ -40,6 +40,7 @@
 | `aiRetry` | `{streamId}` | 重发上次请求 | Rust: 缓存重发 |
 | `aiOpenSettings` | null | 打开设置窗 | Rust: 设置窗口/对话框 |
 | `aiProvidersQuery` | `{requestId}` | 回 `aiProvidersReply` | Rust: 查 keyring |
+| `feishuImportFromUrl` | `{url}` | URL 弹窗提交 → 解析 token → 拉取 → 弹保存位置 | M8 F4-b。token 抠取在 `feishu::url::extract_doc_token`(接受完整 URL 或裸 token);前端只校验非空,不重复实现判定 |
 
 ## 原生 → JS(16 种)
 
@@ -61,6 +62,8 @@
 | `applyFold` | `{collapsed:[int]}` | 折叠状态广播 | |
 | `outlineSet` | `{headings:[{level,text,index}]}` | 大纲全量替换(中继 outlineChanged / 侧栏 editorReady 快照) | M3.5,只发大纲侧栏 |
 | `outlineActive` | `{index:int\|null}` | scrollspy 高亮(中继 activeHeadingChanged) | M3.5,只发大纲侧栏 |
+| `feishuSyncToast` | `{message, kind}` | 飞书同步进度/结果 | M8 F4。`kind` ∈ `progress`\|`done`\|`error`,与 web 侧 `renderToast` 的联合类型逐字对齐;复用 AI toast 组件。终态 5s 自动消失,progress 常驻待顶替 |
+| `feishuOpenImportModal` | `{}` | 菜单「从飞书链接新建…」 | M8 F4-b。原生菜单只发信号,URL 输入框在 web 层(`feishu-import-modal.ts`);提交回 `feishuImportFromUrl` |
 
 ## 资源协议
 

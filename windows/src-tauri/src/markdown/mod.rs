@@ -16,6 +16,11 @@ pub mod tiptap;
 use serde_json::Value;
 
 /// A parsed `.md` file: frontmatter + Tiptap body.
+///
+/// Derives Debug/Clone/PartialEq so pull results (which carry a whole
+/// document) can be asserted on directly in tests — both fields already
+/// satisfy all three.
+#[derive(Debug, Clone, PartialEq)]
 pub struct ParsedDocument {
     pub frontmatter: frontmatter::Frontmatter,
     pub body: Value,

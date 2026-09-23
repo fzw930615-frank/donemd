@@ -37,13 +37,21 @@ pub mod api;
 pub mod app_config;
 pub mod block;
 pub mod callout;
+pub mod cancel;
 pub mod converter;
 pub mod credentials;
 pub mod encoder;
 pub mod http_client;
+pub mod image_download;
+pub mod image_upload;
 pub mod manager;
 pub mod oauth;
 pub mod oauth_receiver;
+pub mod pull;
+pub mod pull_command;
+pub mod push;
+pub mod push_command;
+pub mod url;
 
 // MARK: - 设置页命令(设置窗 invoke;secret 永不回传 webview)
 

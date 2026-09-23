@@ -14,6 +14,12 @@ windows/src-tauri/gen/schemas/
 # 需要时把文件放回 tasks/m4-video-test/assets/ 即可(验收步骤见 tasks/todo.md M4)。
 tasks/m4-video-test/assets/
 
+### 含真实凭据/个人数据的手工测试素材
+# F4 飞书验收用的 .md 里带真实 doc_token 与租户子域(mi.feishu.cn),
+# 指向组织内具体文档,不入公共库。验收方法写在 tasks/todo.md 的 F4 条目里,
+# 本地自建一个填上自己的链接即可。
+tasks/f4-pull-test/
+
 ### Web 构建产物
 # Resources/Web 是**占位目录**(只跟踪 .gitkeep),产物由 `npm --prefix web run build`
 # 生成;Tauri 的 frontendDist 与 Xcode 都从这里取,但它是派生物不是源码。

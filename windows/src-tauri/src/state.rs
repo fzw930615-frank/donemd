@@ -66,6 +66,14 @@ pub struct DocumentState {
     /// A `source-sync` doc fetch is in flight; further `documentChanged`
     /// beats are skipped until the reply lands (it carries latest state).
     pub source_sync_pending: bool,
+    /// 「保存并推送」的意图:脏文档点推送时置位,保存握手完成后由
+    /// `on_document_json` 消费并续跑推送。
+    ///
+    /// 为什么需要它:保存是 `requestDocumentJSON` 异步握手,推送命令的同步
+    /// 前置检查里拿不到「保存完成」这个时刻。没有这个标志时用户点了
+    /// 「保存并推送」只会触发保存,要再点一次推送 —— 实测中用户据此以为
+    /// 推送已发生,而 frontmatter 里根本没有 `last_pushed_at`。
+    pub push_after_save: bool,
 }
 
 pub struct AppState {
@@ -146,6 +154,7 @@ impl AppState {
                 pending_open,
                 epoch: 0,
                 source_sync_pending: false,
+                push_after_save: false,
             }),
             ai_config: Mutex::new(AiConfig::load(
                 crate::ai::providers::default_config_path(),

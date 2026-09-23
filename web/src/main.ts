@@ -14,6 +14,7 @@ import TaskItem from '@tiptap/extension-task-item';
 import BubbleMenu from '@tiptap/extension-bubble-menu';
 import { RawMarkdownBlock } from './raw-markdown-block';
 import { FeishuPlaceholderBlock } from './feishu-placeholder-block';
+import { openFeishuImportModal } from './feishu-import-modal';
 import { Callout } from './callout';
 import { MermaidCodeBlock } from './mermaid-codeblock';
 import { MathInline } from './math-inline';
@@ -355,6 +356,11 @@ on('loadDocument', (payload) => {
   // Flag any broken formulas in the freshly-loaded document (S9 M2) so the
   // source pane red-flags them from the start, not just after the first edit.
   emitBadMath();
+  // 把焦点交给编辑器。飞书拉取/导入的链路中间会弹原生对话框(保存位置、
+  // 确认框),回来后焦点可能落在 body 上 —— 那样 Tiptap 的快捷键全部
+  // 失效,用户以为「快捷键坏了」。不滚动视口:新文档本就在顶部,
+  // scrollIntoView 会在某些时序下把首屏推走。
+  editor.commands.focus('start', { scrollIntoView: false });
 });
 
 // Inbound (Windows/Tauri only): the native side there can't evaluateJavaScript,
@@ -1064,6 +1070,30 @@ on('aiStreamBusy', () => {
   window.setTimeout(() => el.classList.remove('donemd-ai-toast--flash'), 600);
 });
 
+// 飞书同步反馈(M8 F4)。原生侧把进度与结果发到这里,复用 AI 那套 toast
+// 组件 —— 同一套视觉语言,不为第二个来源再造一个浮层。
+//
+// `kind` 由原生侧保证是 'progress' | 'done' | 'error' 之一
+// (`feishu/pull_command.rs` 的 TOAST_* 常量与此处逐字对齐);仍然做一次
+// 收窄,免得一个拼错的 kind 让浮层落到无样式状态。
+// 终态(done/error)5 秒自动消失,与 AI 失败 toast 同节奏;progress 常驻,
+// 由下一条 toast 顶替。
+on('feishuSyncToast', (payload) => {
+  const p = payload as { message?: string; kind?: string };
+  const kind: 'progress' | 'done' | 'error' =
+    p.kind === 'error' ? 'error' : p.kind === 'done' ? 'done' : 'progress';
+  renderToast(p.message ?? '飞书同步', kind, []);
+  if (kind !== 'progress') {
+    window.setTimeout(hideAIToast, 5000);
+  }
+});
+
+// 菜单「飞书 → 从飞书链接新建…」。原生菜单只发信号,输入框在前端
+// (M8 F4-b)—— 提交后经 feishuImportFromUrl 回到原生解析 + 拉取。
+on('feishuOpenImportModal', () => {
+  openFeishuImportModal();
+});
+
 // While streaming, ESC or any character key = cancel (PRD 21/22) — the
 // intuitive "I want to keep editing now" signal. Ignore bare modifier
 // presses (⌘/⇧/⌥/⌃ alone) so a user reaching for a shortcut doesn't trip it.
@@ -1128,20 +1158,49 @@ document.addEventListener(
   true
 );
 
-// Outline sidebar toggle (Windows shell). The native menu carries 视图 →
-// 文档大纲 on Ctrl+Shift+O, but WebView2 usually swallows accelerators while
-// the webview has focus, so mirror the key through the `menuCommand`
-// envelope (the same escape hatch the file commands use). macOS toggles its
-// own SwiftUI sidebar on ⌃⌘S in AppDelegate; in a plain browser preview this
-// key is a no-op.
+// Windows 菜单键的 JS 兜底通道。
+//
+// WebView2 在 webview 聚焦时会吞掉原生菜单的加速键,所以凡是「必须能用」
+// 的命令都要在这里镜像一份,经 `menuCommand` 信封回到原生侧分发。
+//
+// 历史:`menu.rs` 与 `document.rs` 的注释早就声称存在这条兜底,但 2026-09-20
+// 的盘点核实「实际从未实现」,只有 Ctrl+Shift+O(大纲)一个键落地 —— 于是
+// Ctrl+S / Ctrl+N / Ctrl+O 这些在 Windows 上从来没真正工作过(2026-09-23
+// 用户报「windows 快捷键都失效」)。这里把整组补齐。
+//
+// macOS 走 SwiftUI 的 Commands,不需要这条通道(IS_TAURI 为假时整体跳过)。
+//
+// 修饰键判定写成精确匹配而非「包含」:Ctrl+Alt+S(推送)与 Ctrl+S(保存)
+// 只差一个 Alt,松判会让前者顺带触发后者。
 document.addEventListener(
   'keydown',
   (e) => {
     if (!IS_TAURI) return;
-    if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === 'o') {
-      e.preventDefault();
-      send('menuCommand', { command: 'toggleOutline' });
+    if (!e.ctrlKey || e.metaKey) return;
+    const key = e.key.toLowerCase();
+    const shift = e.shiftKey;
+    const alt = e.altKey;
+
+    let command: string | null = null;
+    if (!alt && !shift) {
+      // Ctrl+<key>
+      if (key === 'n') command = 'new';
+      else if (key === 'o') command = 'open';
+      else if (key === 's') command = 'save';
+    } else if (!alt && shift) {
+      // Ctrl+Shift+<key>
+      if (key === 's') command = 'saveAs';
+      else if (key === 'o') command = 'toggleOutline';
+    } else if (alt && !shift) {
+      // Ctrl+Alt+<key> —— 飞书同步
+      if (key === 'o') command = 'feishuPull';
+      else if (key === 's') command = 'feishuPush';
     }
+    if (!command) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+    send('menuCommand', { command });
   },
   true
 );

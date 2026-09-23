@@ -137,8 +137,57 @@ macOS 原版 `donemd/Feishu/`（24 文件 ~8,800 行 Swift + ~4,300 行测试）
   - 设置窗升级通用「设置」窗：`settings.ts` 顶层分段 tab（AI/飞书同步，飞书态懒加载首碰 keyring）+ 飞书 pane（凭证卡片：App ID / App Secret〔不回填，留空=沿用〕/ 重定向 URL+复制，保存到凭据管理器 + 清除（仅 keyring 源），徽标三态 ✓已配置 / env·文件 / 未配置；账号段：notConfigured 引导 / loggedOut 登录飞书〔在途→「正在等待浏览器授权…」〕/ loggedIn ✓已登录+租户+重新登录+登出，lastError 显错）；菜单「AI 设置…」→「设置…」、窗口标题同步。
   - 测试 324 → **360 全绿**（+36：manager ~14 + app_config 17 + credentials 2 + oauth 补充；`#[ignore]` 5 = 既有 3 + keyring 探针 2）；npm build 四入口通过。
   - 🖐️ **人工验收（真凭据，F2 清单）**：设置→飞书同步存凭证（CredMan 两条目）→ 登录飞书 → 浏览器授权 → 回环页「登录成功」→ 已登录（租户）→ 重启保持 → refresh 静默续期 → 登出清理（条目删、镜像 loggedOut）→ 端口占用中文报错。可与 F4 端到端合并跑。
-- ⬜ F3 同步引擎：push/pull 协调器、图片上下传 stage、快照/首拉。
-- ⬜ F4 接线：菜单 + 进度条/浮层 UI + feishu-doc 握手 + 🖐️ 真凭据端到端。
+- 🔄 F3 同步引擎：push/pull 协调器、图片上下传 stage、快照/首拉。
+  - **F3-b 拉取链路（已完成，验收记录见下方同名条目）**——先做拉取而非推送的理由：链路短、测试量小，做完即可用真实飞书文档验证整条管道（转换层在真机数据上的问题会提前暴露，早于 53 KB 的推送协调器）。
+    - **依赖核对结论**：底层全部就绪，缺口只有 3 处。已有 → `api::pull_document`（返回 `(Vec<FeishuBlock>, i64)`，blocks + revision，正是协调器所需）、`api::download_image`（返回 `(Vec<u8>, String)`，字节 + mime）、`converter::to_markdown_with_warnings` → `ConversionResult`、`markdown::parse_document`、`frontmatter::{merge, PlaceholderBlockRef, last_pulled_revision, placeholder_blocks}`、`assets::import_asset`（SHA-256 命名 + 跨拉取去重，正是 Swift `ImageWriter` 的生产实现）。
+    - **新建 1 — `feishu/cancel.rs`**（~30 行 + 2 例）：`FeishuSyncCancellationSignal` 的 Rust 对等物。Swift 是 `NSLock` + bool；Rust 用 `Arc<AtomicBool>` 即可（协调器在检查点轮询，UI 侧写一次，幂等）。
+    - **新建 2 — `feishu/image_download.rs`**（~200 行 + ~15 例）：`FeishuImageDownloadStage` 移植。遍历 Tiptap body 找 `image` 节点中 `src` 前缀为 `feishu://image/` 的项，按 token 做**单次拉取内去重**（同一 token 出现两次只打一次网络），经可注入的 `ImageWriter` trait 落盘（生产接 `assets::import_asset`，测试注内存实现），把 `src` 改写成资源 URL。**逐张软失败**：下载或落盘失败只记入 `Report.failed_tokens` 并保留原 `src`（用户可重新拉取），绝不中断整次拉取。预扫一遍得 `total` 供进度用。
+    - **新建 3 — `feishu/pull.rs`**（~250 行 + ~20 例）：`FeishuPullCoordinator` 移植。`PullError{ApiFailed(FeishuApiError), Cancelled}`、`Progress{PullingDocument, ImageStageStarted{total}, ImageDownloaded{index,total}, ImageStageFinished, Done}`、`PullResult{updated_document, warnings, image_report}`。
+    - **必须由测试锁死的行为契约**（从 Swift 源逐条提取）：① 取消只在 3 个检查点判定——调 `pull_document` 前、转换前、**图片 stage 返回后**（刻意不在遍历中途，半应用的 stage 状态会丢失「哪些已下载」的账）；② 图片失败逐张软跳，不影响 body 产出；③ 无图片时**仍发** `ImageStageStarted{total:0}`（UI 靠它决定是否跳过该行）；④ `doc_url` 只在调用方提供时写入，**永不把已知 URL 覆盖成 nil**；⑤ `placeholder_blocks` 是按新 body **整体重写**而非合并（旧索引已失效，body 被替换了）；⑥ 拉取后 `has_fence` 恒为 true（否则下次保存会丢绑定）；⑦ `feishu_original_index` 缺省时取 `user_fields.len()`；⑧ 占位块引用按 `block_id` 去重且保持文档顺序；⑨ 用户自定义 frontmatter 字段与 `feishu.unknown` 键逐字往返。
+    - **有意的平台差异**：Swift 有 `DocToken` newtype，Rust 侧 frontmatter 用 `Option<String>`，不为此单独引入新类型。
+    - 量级估计：约 500 行 Rust + ~37 例测试（远小于按 Swift 体积的直觉估计，因为传输层与转换层已完成）。
+    - 不在本批内：撤销快照 `FeishuPullSnapshotStore`（服务于 F4 的「撤销上次拉取」命令）、`FeishuPullCommand` 的对话框与前置检查（F4）。
+  - **F3-b 拉取链路 — ✅ 自动验收 2026-09-23（cargo 372 → 403）**
+    - 落地三文件：`feishu/cancel.rs`（`CancellationSignal`，`Arc<AtomicBool>` 对等 Swift 的 `NSLock`+bool，`Clone` 共享状态，3 例）、`feishu/image_download.rs`（`ImageDownloadStage` + `ImageWriter` trait + `AssetsImageWriter` 生产实现，11 例）、`feishu/pull.rs`（`PullCoordinator`/`PullError`/`Progress`/`PullResult`，18 例）。
+    - **依赖核对结论（实施前做的，避免返工）**：底层全部就绪 —— `api::pull_document` 返回 `(Vec<FeishuBlock>, i64)` 正是所需、`api::download_image` 返回 `(Vec<u8>, String)` 正是所需、`converter::blocks_to_tiptap`、`markdown::parse_document`、`frontmatter::{merge, PlaceholderBlockRef}`、`assets::import_asset`（SHA-256 命名即 Swift `ImageWriter` 的生产语义）。缺口只有上述 3 处。
+    - **有意偏离 Swift ①**：Swift 走 blocks → Markdown 文本 → `parseDocument` → body 的往返；这里直接用 `converter::blocks_to_tiptap`（该函数的文档注释本就写明「F3 拉取协调器直接消费」，且 `to_markdown_with_warnings` 是建在它之上的薄壳）。少一次序列化/反解析，不被 M2 记录的 Markdown 规范化（`*`/`+`→`-`、setext→ATX、`_`→`*`、空行折叠）碰到；那些规范化对 Tiptap 结构幂等，但往返还会丢掉「Markdown 语法表达不了的节点」，直达路径严格丢得更少。警告集合两路同源同聚合，行为一致。
+    - **有意偏离 Swift ②**：Swift 在递归遍历中途惰性下载图片；Rust 拆成「预扫收集 → 顺序下载 → 同步改写」三趟。理由是 async 递归需手动装箱 future，而三趟结构既避开装箱，又让下载顺序、去重集合、进度回调序列与 Swift 逐项一致（预扫保持文档顺序）。
+    - **类型设计**：`FeishuApi` 带 AFIT 无 dyn 兼容面（F2 踩过 E0038），故协调器与 stage 都对 `A: FeishuApi` 泛型化；`ImageWriter` 是同步 trait、对象安全，故走 `Option<&dyn ImageWriter>` 表达「可选图片阶段」，不必为一个可能不存在的 writer 多背类型参数。`DocToken` newtype 未引入（frontmatter 已用 `Option<String>`，全链路包装拆装不划算）。
+    - **顺带改动**：`markdown::ParsedDocument` 补 `#[derive(Debug, Clone, PartialEq)]`（两个字段本就满足，测试需要整文档断言）；`PullError` 只 `PartialEq` 不 `Eq`（跟随 `FeishuApiError`）。
+    - **9 条行为契约全部有测试锁死**：① 取消只在 3 个检查点（API 前 / 转换前 / **图片 stage 返回后**，刻意不在遍历中途——半应用状态会丢失下载账目）② 图片逐张软失败不中断拉取 ③ 无图片仍发 `ImageStageStarted{total:0}` ④ `doc_url` 永不被覆盖成 `None` ⑤ `placeholder_blocks` 按新 body 整体重写而非合并 ⑥ 拉取后 `has_fence` 恒真 ⑦ `feishu_original_index` 缺省取 `user_fields.len()` ⑧ 占位块按 `block_id` 去重且保文档顺序 ⑨ 用户字段与 `feishu.unknown` 逐字往返（含 `last_pushed_at` 不被拉取动）。另补端到端两例：带真实图片走完整链路（验协调器与 stage 的接线面——进度事件交织 + report 传递，两边各自正确不保证接线正确）、图片失败时拉取仍成功且坏引用保留。
+    - 过渡期死码：`AssetsImageWriter` 未被构造（F4 接线时消费），与 `manager::http_api` 同类。
+    - 不在本批内：撤销快照 `FeishuPullSnapshotStore`、`FeishuPullCommand` 的对话框与前置检查（均属 F4）。**做完本批仍不能从菜单点** —— 引擎已就绪，入口待 F4。
+  - **F3-c 推送链路（计划，2026-09-23）**——用户场景确认：推送对象是 coding 产出的 md 交付文档，**基本只有标题与代码块**，不含飞书表格/画板/多维表格/脑图。据此把段式推送后置，第一批做安全子集。
+    - **为什么推送比拉取危险**：飞书没有「整体覆盖正文」的 API，唯一写路径是 delete-then-create（先删根子块再整棵重建）。含占位块（sheet/board/bitable/mindnote）的文档若走这条路，会连带重建那些块，**摧毁其他用户在其上的实时协作数据**。Swift 侧为此定义了 9 种错误、其中 6 种是占位块相关硬停止，并在段式推送（#57）上线前直接拒绝推送含占位块的文档。
+    - **第一批范围（安全子集）**：① `feishu/image_upload.rs` 图片上传 stage（`image_download.rs` 的镜像：本地资源 src → `upload_image` → 换成 `feishu://image/<token>`，与拉取侧形成对称往返；逐张软失败 + 警告）② `feishu/push.rs` 推送协调器 happy path ③ `feishu/push_command.rs` 命令 + 菜单 ④ 场景 A：本地新建文档 → `create_document` 建远端 → 推正文 ⑤ 场景 B：已绑定文档 → 覆盖远端正文。
+    - **刻意的硬停止**：含 `feishu_placeholder_block` 的文档**拒绝推送**（`ContainsPlaceholderBlocks`），不冒险覆盖。宁可不能用，不可摧毁远端数据 —— 与 Swift 同样取舍。
+    - **孤儿文档契约（必做，否则会重复建文档）**：`create_document` 成功但 `push_document` 失败时，远端已存在一篇空文档。必须以 `PartialSuccess { orphaned_doc_token }` 上浮，且**调用方在任何重试之前先把 doc_token 写回 frontmatter** —— 否则下次推送会再建一篇，双重孤儿。
+    - **revision 冲突预检（用户未要求，主动加）**：推送前比对本地 `last_pulled_revision` 与远端当前 revision，不一致说明远端在本地编辑期间也变了，直接覆盖会丢他人改动 → `RemoteAhead` 并让用户选择。
+    - **连带陷阱**：推送自身会让远端 revision 递增，若推送成功后不回写 `last_pulled_revision`，**第二次推送必然误报「远端已领先」**。故推送成功后须重读 revision 并写回。这条要有测试锁死。
+    - **第二批（后置）**：占位块索引一致性预检（`placeholderIndexMismatch` 等 5 种）+ 段式推送（按占位块切段，只删改非占位段，占位块用 `preserve_existing` 引用留住）。解锁含表格/画板的文档。飞书无 `move_block` API，故两侧占位块顺序不同时无法调和，只能要求先拉取。
+  - **F3-c 第一批 — ✅ 自动验收 + 🖐️ 真机通过 2026-09-23（cargo 418 → 452）**
+    - 落地：`feishu/image_upload.rs`（`ImageUploadStage` + `ImageReader` trait + `AssetsImageReader`，9 例）、`feishu/push.rs`（`PushCoordinator`/`PushError`/`Progress`/`PushResult`，19 例）、`feishu/push_command.rs`（命令 + 菜单 + 两场景，6 例）。菜单新增「推送到飞书」（Ctrl+Alt+S）。
+    - 图片双向对称：上传 stage 把本地资源 src 改写成 `feishu://image/<token>`，与拉取侧同一形态，于是「拉取 → 编辑 → 推送 → 再拉取」往返闭合。逐张软失败并在结果里报「N 成功 / M 失败（失败的图在飞书侧缺失）」。
+    - **revision 自增陷阱已修 + 有回归测试**：推送自身让远端 revision 递增，不回写 `last_pulled_revision` 则第二次推送必然误报 `RemoteAhead`。测试方式是推一次、拿回写后的 frontmatter 再推一次，断言第二次不被误判。
+    - **占位块闸门**：两条测试钉死 —— `force` 也不能越过（数据安全红线，非用户偏好）；缺 `block_id` 的占位块同样拦下（delete-then-create 照样会重建它）。
+    - **孤儿文档**：`PartialSuccess` 分支里**先写盘再告知**，写盘失败则把 token 原文给用户手填。
+    - 🖐️ **真机教训一(阻塞性 bug,已修)**：脏文档的「保存并推送」原先只触发保存就返回、要求再点一次推送 —— 用户据此**以为推送已成功**，而 frontmatter 里根本没有 `last_pushed_at`（正是靠这个字段缺失定位的）。修法:`DocumentState.push_after_save` 意图标志，由 `document::on_document_json` 在保存落盘后续跑推送；标志取出即清零（防后续无关保存误触发），保存失败则撤销意图。
+    - 🖐️ **真机教训二(排查盲区,已修)**：`preflight` 的四个返回点原先只弹对话框、不写日志，用户报「推送没反应」时无从判断是哪道闸门拦下。现每个返回点都有 `[feishu] 推送中止:<原因>`，并在入口打印「已保存/脏/已绑定」三态与实际取到的远端标题。
+    - 🖐️ **真机发现三(认知修正)**：飞书的 docx 端点**直接接受 wiki 节点 token**（用户的 `doc_token` 一直是 wiki token，拉取却成功到 revision 9）。`FeishuAPIClient.swift` 那句「v1 端点内部消歧」的适用面比先前判断的广，故 `resolve_docx_token` 的 wiki 回退在实践中极少触发（留着无害，是正确的兜底）。
+    - 🖐️ **真机发现四(待决策,未修)**：`create_document` 未传 `folder_token`，新建的远端文档落在**「我的云盘」根目录**而非用户的知识库。用户文档全在 wiki，故首次找不到推送结果。要落进知识库需调 wiki 建节点接口（`wiki/v2/spaces/{space_id}/nodes`），与当前 docx 建文档是两条路，且需要用户指定目标知识库。
+    - 仍未做：模态进度条 + 取消按钮（`CancellationSignal` 引擎侧就绪，UI 未接）、撤销上次拉取、段式推送（第二批）。
+- 🔄 F4 接线：菜单 + 进度条/浮层 UI + feishu-doc 握手 + 🖐️ 真凭据端到端。
+  - **F4-a 拉取菜单入口 — ✅ 自动验收 2026-09-23（cargo 403 → 405，vitest 58 全绿，web 四入口构建通过）**
+    - `feishu/pull_command.rs`：前置检查按 Swift 顺序（未绑定 → 未保存 → 未配置凭证 → **未登录** → 脏文档处置），脏文档三选对话框（放弃 / 存副本 `<名>.local.md` / 取消），空拉取检测（revision 未变则不应用、不碰脏标记、不重载编辑器，如实告知「飞书暂无更新」——对齐 Swift 的 no-op 分支）。2 例纯函数测试（备份路径推导）。
+    - `menu.rs`：新增「飞书」菜单，含「从飞书拉取」（Ctrl+Alt+O，对齐 macOS 的 ⌘⌥O）+「飞书同步设置…」（与 AI 共用设置窗）。**只接了拉取** —— 推送协调器（F3-c）与撤销快照未移植，宁可少一个条目也不放点了报「未实现」的死按钮。
+    - `document.rs`：新增 `apply_pulled_document`（写盘 + 采纳为内存态 + 双栏重载 + epoch 递增作废在途 source-sync）。**不走 `requestDocumentJSON` 握手** —— 拉取时协调器的产物才是真源，不是 webview，方向与保存相反。`write_atomic` 提为 `pub(crate)`。
+    - `feishuSyncToast` 新信封（已记入 `bridge-contract.md`）+ `web/src/main.ts` 处理器，复用 AI 那套 toast 组件；`kind` ∈ `progress`/`done`/`error` 与 web 侧 `renderToast` 的联合类型逐字对齐，web 侧再收窄一次防拼错。
+    - **线程划分（有意偏离 Swift）**：阻塞对话框只在同步的 `preflight` 里弹（菜单事件主线程，与 `document.rs` 已验证路径一致）；异步 `run` 里一律只发 toast 不弹对话框 —— 从 async 任务调 `blocking_show` 会占住运行时工作线程，且进度/结果本就更适合非阻塞反馈。
+    - **踩坑记档**：`ImageWriter` 起初没加 `Send + Sync`，导致整条管线 future 非 Send、`tauri::async_runtime::spawn` 拒收（`future cannot be sent between threads safely`）。根因是设计时漏了约束 —— 用在异步管线里的 writer 本来就必须可共享。补上 `Send + Sync` 后，测试 mock 的 `RefCell` 不满足 `Sync`，顺势全部改 `Mutex`，**连带去掉了两处 `unsafe impl Sync`**（原本是为 RefCell 打的补丁，改 Mutex 后不再需要 unsafe）。
+    - 死码墙进一步下降：`AssetsImageWriter` / `manager::http_api` / `http_client::new` 三条警告消失（被 F4 消费）。剩余为 push/import 面（`update_document_title`/`resolve_wiki_node`，待 F3-c/F5）与既有项。
+    - 既有基线记录：`npx tsc --noEmit` 在本仓库有 10 条既存错误（`block-drag-handle.ts` 未用导入、`callout.ts` 的 `Node` 类型冲突、`settings.ts` 的 `__TAURI__` 重复声明、`vite.config.ts` 缺 `@types/node`），`main.ts` 本次改动无错。项目 scripts 无 tsc 门禁，未在本批处理。
+    - 🖐️ **待人工验收（需真机 + 已绑定 doc_token 的文档）**：菜单可见 → 未绑定文档点击弹正确提示 → 未保存文档点击弹提示 → 已绑定文档拉取成功（toast 序列 progress→done、正文替换、图片落地、frontmatter 盖 revision）→ 再点一次应报「飞书暂无更新」→ 脏文档三选对话框各分支。
+    - 仍未做（F4 后续）：模态进度条 + 取消按钮（`CancellationSignal` 已就绪但 UI 未接，当前传 `None`）、推送菜单项、撤销上次拉取。
 - ⬜ F5 后置：url_detector / sync_root / import。
 
 ## 预留接口（对应 dead-code 警告，随里程碑接入后消除）

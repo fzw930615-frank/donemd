@@ -65,6 +65,8 @@ pub fn bridge_dispatch(app: AppHandle, webview: Webview, envelope: Value) {
         "aiRetry" => crate::ai::handle_retry(&app, &payload),
         "aiOpenSettings" => crate::ai::open_settings(&app),
         "aiProvidersQuery" => crate::ai::reply_providers(&app, &payload),
+        // 飞书:web 层 URL 弹窗提交(M8 F4-b)。
+        "feishuImportFromUrl" => crate::feishu::pull_command::handle_import_from_url(&app, &payload),
         other => eprintln!("[bridge] unhandled type: {other}"),
     }
 }

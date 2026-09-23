@@ -86,8 +86,24 @@ pub fn build(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         .item(&item("ins:table", "表格", Some("CmdOrCtrl+Alt+T"))?)
         .build()?;
 
+    // 飞书同步菜单(F4)。macOS 侧是 `CommandMenu("飞书")`。Windows 现已接
+    // 拉取(F4-a)、URL 新建(F4-b)与推送(F3-c 第一批)。仍缺:撤销上次
+    // 拉取、段式推送(含飞书专有块的文档目前会被推送命令拒绝)。
+    //
+    // 快捷键:macOS 拉取用 ⌘⌥O、推送用 ⌘⌥S;Windows 沿用同形。
+    // 菜单加速键在 WebView2 聚焦时常被吞(见本文件头注),所以这里主要是
+    // 可发现性与鼠标可达性。
+    let feishu = SubmenuBuilder::new(app, "飞书")
+        .item(&item("feishu:import", "从飞书链接新建…", None)?)
+        .separator()
+        .item(&item("feishu:pull", "从飞书拉取", Some("CmdOrCtrl+Alt+O"))?)
+        .item(&item("feishu:push", "推送到飞书", Some("CmdOrCtrl+Alt+S"))?)
+        .separator()
+        .item(&item("feishu:settings", "飞书同步设置…", None)?)
+        .build()?;
+
     MenuBuilder::new(app)
-        .items(&[&file, &view, &format, &insert])
+        .items(&[&file, &view, &format, &insert, &feishu])
         .build()
 }
 
@@ -106,6 +122,11 @@ pub fn on_event(app: &AppHandle, event: MenuEvent) {
         }
         "aiSettings" => crate::ai::open_settings(app),
         "view:outline" => crate::outline::toggle(app),
+        "feishu:pull" => crate::feishu::pull_command::invoke(app),
+        "feishu:import" => crate::feishu::pull_command::open_import_modal(app),
+        "feishu:push" => crate::feishu::push_command::invoke(app),
+        // 飞书同步与 AI 共用同一个设置窗(两个 tab),消息名沿用历史契约。
+        "feishu:settings" => crate::ai::open_settings(app),
         "ins:image" => document::insert_image_dialog(app),
         "ins:video" => document::insert_video_dialog(app),
         "ins:table" => bridge::send_to_editor(app, "insertTable", json!(null)),

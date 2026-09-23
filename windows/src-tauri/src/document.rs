@@ -21,7 +21,10 @@ use crate::state::{empty_tiptap_doc, fresh_staging_dir, AppState, PendingSave};
 
 // MARK: - menu command entry points
 
-/// `menuCommand` envelope from the JS key fallback (`web/src/main.ts`).
+/// `menuCommand` 信封 —— `web/src/main.ts` 的按键兜底通道。
+///
+/// WebView2 聚焦时会吞掉原生菜单加速键,所以前端把这些键镜像过来。
+/// 分发的目标与菜单项完全一致(同一函数),不另开一套逻辑。
 pub fn on_menu_command(app: &AppHandle, payload: &Value) {
     match payload.get("command").and_then(Value::as_str) {
         Some("new") => new_document(app),
@@ -29,6 +32,8 @@ pub fn on_menu_command(app: &AppHandle, payload: &Value) {
         Some("save") => save(app),
         Some("saveAs") => save_as(app),
         Some("toggleOutline") => crate::outline::toggle(app),
+        Some("feishuPull") => crate::feishu::pull_command::invoke(app),
+        Some("feishuPush") => crate::feishu::push_command::invoke(app),
         other => eprintln!("[document] unknown menuCommand: {other:?}"),
     }
 }
@@ -272,6 +277,9 @@ pub fn on_document_json(app: &AppHandle, payload: &Value) {
     let markdown_text = markdown::serialize(&parsed);
 
     if let Err(e) = write_atomic(&pending.path, markdown_text.as_bytes()) {
+        // 保存失败 ⇒ 撤掉「保存并推送」的意图,否则标志会留在装填状态,
+        // 下一次无关的保存会意外触发一次推送。
+        state.doc.lock().unwrap().push_after_save = false;
         app.dialog()
             .message(format!("保存失败：{e}"))
             .title("Done.md")
@@ -284,23 +292,75 @@ pub fn on_document_json(app: &AppHandle, payload: &Value) {
             eprintln!("[save] asset migration failed: {e}");
         }
     }
-    {
+    let continue_push = {
         let mut doc = state.doc.lock().unwrap();
         doc.dirty = false;
         bridge::update_title(app, &doc);
-    }
+        // 「保存并推送」的续跑点 —— 取出即清零,避免任何后续保存
+        // (比如关闭时的保存)意外触发一次推送。
+        std::mem::take(&mut doc.push_after_save)
+    };
     if pending.close_after {
         if let Some(window) = app.get_webview_window("main") {
             let _ = window.destroy();
         }
+        return;
+    }
+    if continue_push {
+        eprintln!("[feishu] 保存完成,续跑推送");
+        crate::feishu::push_command::invoke(app);
     }
 }
 
 /// Write-temp-then-rename so a crash mid-save can't truncate the document.
-fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let tmp = path.with_extension("md.donemd-tmp");
     std::fs::write(&tmp, bytes)?;
     std::fs::rename(&tmp, path)?;
+    Ok(())
+}
+
+/// Apply a document produced by the 飞书 pull coordinator: write it to disk,
+/// adopt it as the in-memory state, and reload both panes.
+///
+/// Unlike `save`, this needs NO `requestDocumentJSON` handshake — the pulled
+/// document IS the source of truth here, not the webview, so we serialize what
+/// the coordinator returned and push it INTO the editor (the reverse direction
+/// of a save). Mirrors the macOS `applyUpdatedDocumentAndSave`: the file on
+/// disk is overwritten, so the dirty flag lands clean.
+///
+/// The caller has already gated on the dirty flag (pull overwrites the body,
+/// so unsaved edits must be dealt with first — see `pull_command`).
+pub(crate) fn apply_pulled_document(
+    app: &AppHandle,
+    path: &Path,
+    parsed: markdown::ParsedDocument,
+) -> Result<(), String> {
+    let markdown_text = markdown::serialize(&parsed);
+    write_atomic(path, markdown_text.as_bytes()).map_err(|e| format!("写入失败：{e}"))?;
+
+    let state = app.state::<AppState>();
+    let source_markdown;
+    {
+        let mut doc = state.doc.lock().unwrap();
+        doc.file_path = Some(path.to_path_buf());
+        doc.dirty = false;
+        doc.tiptap_doc = parsed.body.clone();
+        doc.frontmatter = parsed.frontmatter;
+        // 折叠态与大纲跟随新正文重建(旧序数对新文档无意义)。
+        doc.collapsed_headings.clear();
+        doc.outline.clear();
+        doc.active_heading = None;
+        doc.pending_save = None;
+        // 作废在途的 source-sync 回包 —— 它携带的是拉取前的旧正文。
+        doc.epoch += 1;
+        doc.source_sync_pending = false;
+        source_markdown = serialize_body(&doc);
+        bridge::update_title(app, &doc);
+    }
+    bridge::send_to_editor(app, "loadDocument", parsed.body);
+    bridge::send_to_editor(app, "applyFold", json!({ "collapsed": [] }));
+    push_source_snapshot(app, source_markdown);
     Ok(())
 }
 

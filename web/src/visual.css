@@ -1377,6 +1377,143 @@ body::-webkit-scrollbar-thumb:hover {
 }
 :root[data-theme="night"] .donemd-mermaid-drawer__btn:hover { background: rgba(255, 255, 255, 0.18); }
 
+/* --- M8 F4-b:「从飞书链接新建」URL 录入弹窗 ---------------------------
+   结构与视觉刻意对齐 .donemd-mermaid-drawer(透明遮罩 + 毛玻璃面板),
+   只是尺寸收成一个紧凑的输入框对话框。三套主题与抽屉同样式组织:
+   基础(亮) / prefers-color-scheme: dark / [data-theme="night"]。 */
+.donemd-feishu-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2100; /* 高于 Mermaid 抽屉,菜单触发时永远在最上层 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+}
+
+.donemd-feishu-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(520px, 88vw);
+  padding: 18px 20px 16px;
+  background: rgba(246, 246, 248, 0.82);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  backdrop-filter: blur(30px) saturate(180%);
+  border: 0.5px solid rgba(0, 0, 0, 0.12);
+  border-radius: 12px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.30);
+}
+
+.donemd-feishu-modal__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1c1c1e;
+}
+
+.donemd-feishu-modal__hint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #6b6b70;
+}
+
+.donemd-feishu-modal__input {
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 10px;
+  border: 0.5px solid rgba(0, 0, 0, 0.18);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.70);
+  color: #1c1c1e;
+  outline: none;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.donemd-feishu-modal__input:focus {
+  border-color: #0a84ff;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.22);
+}
+
+/* 常驻占位,有错误时才有字 —— 避免出现/消失时面板高度跳动。 */
+.donemd-feishu-modal__error {
+  min-height: 16px;
+  font-size: 12px;
+  color: #d70015;
+}
+
+.donemd-feishu-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.donemd-feishu-modal__btn {
+  font: inherit;
+  font-size: 13px;
+  border: 0.5px solid rgba(0, 0, 0, 0.14);
+  background: rgba(255, 255, 255, 0.55);
+  color: #1c1c1e;
+  padding: 5px 16px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.donemd-feishu-modal__btn:hover { background: rgba(255, 255, 255, 0.85); }
+
+.donemd-feishu-modal__btn--primary {
+  background: #0a84ff;
+  border-color: #0a84ff;
+  color: #ffffff;
+}
+
+.donemd-feishu-modal__btn--primary:hover { background: #0a7ae8; }
+
+@media (prefers-color-scheme: dark) {
+  .donemd-feishu-modal {
+    background: rgba(38, 40, 44, 0.78);
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+  .donemd-feishu-modal__title { color: #f0f0f2; }
+  .donemd-feishu-modal__hint { color: #a0a0a6; }
+  .donemd-feishu-modal__input {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.18);
+    color: #e6e6e8;
+  }
+  .donemd-feishu-modal__error { color: #ff6961; }
+  .donemd-feishu-modal__btn {
+    border-color: rgba(255, 255, 255, 0.16);
+    background: rgba(255, 255, 255, 0.10);
+    color: #e6e6e8;
+  }
+  .donemd-feishu-modal__btn:hover { background: rgba(255, 255, 255, 0.18); }
+  .donemd-feishu-modal__btn--primary {
+    background: #0a84ff;
+    border-color: #0a84ff;
+    color: #ffffff;
+  }
+}
+
+:root[data-theme="night"] .donemd-feishu-modal {
+  background: rgba(26, 32, 41, 0.80);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+:root[data-theme="night"] .donemd-feishu-modal__title { color: #e2e8f0; }
+:root[data-theme="night"] .donemd-feishu-modal__hint { color: #96a2b4; }
+:root[data-theme="night"] .donemd-feishu-modal__input {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: #d5dce6;
+}
+:root[data-theme="night"] .donemd-feishu-modal__error { color: #ff6961; }
+:root[data-theme="night"] .donemd-feishu-modal__btn {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.10);
+  color: #d5dce6;
+}
+:root[data-theme="night"] .donemd-feishu-modal__btn:hover { background: rgba(255, 255, 255, 0.18); }
+
 /* --- Phase 3 #63: AI streaming (临时态) + bubble AI dropdown + toast ------ */
 
 /* Original selection while streaming: greyed + struck through underneath. */
