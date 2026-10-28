@@ -567,14 +567,39 @@ pub enum ResponseVerdict {
 
 /// 信封 `{code, msg}` 预解 — 错误分支要在整包有效前就能读到飞书
 /// 的判定。体不是 JSON 时返回 (None, None)。
+///
+/// 99992402 等校验类错误的 `msg` 只有一句「field validation failed」,
+/// 具体是哪个字段在 `error.field_violations[]{field, description}` 里
+/// — 有则拼到 msg 后面,否则报障时只能靠猜。
 pub fn envelope_metadata(body: &[u8]) -> (Option<i64>, Option<String>) {
     serde_json::from_slice::<Value>(body)
         .ok()
         .map(|v| {
-            (
-                v.get("code").and_then(Value::as_i64),
-                v.get("msg").and_then(Value::as_str).map(String::from),
-            )
+            let code = v.get("code").and_then(Value::as_i64);
+            let mut msg = v.get("msg").and_then(Value::as_str).map(String::from);
+            let violations: Vec<String> = v
+                .pointer("/error/field_violations")
+                .and_then(Value::as_array)
+                .map(|list| {
+                    list.iter()
+                        .map(|fv| {
+                            let field = fv.get("field").and_then(Value::as_str).unwrap_or("?");
+                            match fv.get("description").and_then(Value::as_str) {
+                                Some(d) if !d.is_empty() => format!("{field}: {d}"),
+                                _ => field.to_string(),
+                            }
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            if !violations.is_empty() {
+                let detail = violations.join("; ");
+                msg = Some(match msg {
+                    Some(m) => format!("{m} [{detail}]"),
+                    None => format!("[{detail}]"),
+                });
+            }
+            (code, msg)
         })
         .unwrap_or((None, None))
 }
@@ -1189,6 +1214,26 @@ mod tests {
         let body = json_body(json!({ "code": 99991679, "msg": "scope" }));
         assert_eq!(envelope_metadata(&body), (Some(99991679), Some("scope".into())));
         assert_eq!(envelope_metadata(b"not json"), (None, None));
+    }
+
+    #[test]
+    fn envelope_metadata_appends_field_violations() {
+        // 99992402 的 msg 本身不说是哪个字段;field_violations 才说。
+        let body = json_body(json!({
+            "code": 99992402,
+            "msg": "field validation failed",
+            "error": { "field_violations": [
+                { "field": "descendants[3].text.elements[0].text_run.text_element_style.link.url",
+                  "description": "invalid url" },
+                { "field": "index" }
+            ]}
+        }));
+        let (code, msg) = envelope_metadata(&body);
+        assert_eq!(code, Some(99992402));
+        assert_eq!(
+            msg.as_deref(),
+            Some("field validation failed [descendants[3].text.elements[0].text_run.text_element_style.link.url: invalid url; index]")
+        );
     }
 
     // MARK: - 响应体解析

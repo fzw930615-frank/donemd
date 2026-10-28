@@ -315,9 +315,49 @@ fn encode_style(style: &TextElementStyle) -> Value {
         "underline": false,
     });
     if let Some(link) = &style.link {
-        dict["link"] = json!({ "url": link });
+        // 飞书块结构文档:link.url「需要 url_encode」。裸 URL(含 `:`
+        // `/` `?` `&`)会被严格校验器以 99992402 拒收;拉取侧对称解码,
+        // 见 decode 侧 [`percent_decode`]。
+        dict["link"] = json!({ "url": percent_encode_component(link) });
     }
     dict
+}
+
+/// `encodeURIComponent` 同款:除 RFC 3986 unreserved 与 `!*'()` 外,
+/// 按 UTF-8 字节逐个 `%XX`。不引依赖 — 十几行即可。
+pub(crate) fn percent_encode_component(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for &b in input.as_bytes() {
+        let keep = b.is_ascii_alphanumeric()
+            || matches!(b, b'-' | b'_' | b'.' | b'~' | b'!' | b'*' | b'\'' | b'(' | b')');
+        if keep {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+/// 单次 `%XX` 解码(`encode` 的逆)。非法转义原样保留;解出的字节
+/// 不是合法 UTF-8 时整体退回原串 — 宁可显示编码态,也不吐乱码。
+pub(crate) fn percent_decode(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).ok();
+            if let Some(v) = hex.and_then(|h| u8::from_str_radix(h, 16).ok()) {
+                out.push(v);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8(out).unwrap_or_else(|_| input.to_string())
 }
 
 // MARK: - 解码
@@ -569,7 +609,8 @@ fn decode_element(raw: &Value) -> Option<TextElement> {
         italic: style_dict["italic"].as_bool().unwrap_or(false),
         inline_code: style_dict["inline_code"].as_bool().unwrap_or(false),
         strikethrough: style_dict["strikethrough"].as_bool().unwrap_or(false),
-        link: style_dict["link"]["url"].as_str().map(str::to_string),
+        // 线上恒为 url_encode 形态(推送侧同款),解一次还原成人类可读 URL。
+        link: style_dict["link"]["url"].as_str().map(percent_decode),
         had_stripped_feishu_color: had_stripped_color,
     };
     Some(TextElement::TextRun(TextRun {
@@ -979,6 +1020,57 @@ mod tests {
         };
         assert_eq!(payload.subtype, PlaceholderSubtype::Embed);
         assert_eq!(payload.url, "https://example.com/embed");
+    }
+
+
+    // MARK: - link.url 的 url_encode(2026-10-19 真机 99992402)
+
+    #[test]
+    fn link_url_is_percent_encoded_on_the_wire() {
+        let style = TextElementStyle {
+            link: Some("https://example.com/a b?x=1&y=中".into()),
+            ..TextElementStyle::default()
+        };
+        let wire = encode_style(&style);
+        assert_eq!(
+            wire["link"]["url"],
+            "https%3A%2F%2Fexample.com%2Fa%20b%3Fx%3D1%26y%3D%E4%B8%AD"
+        );
+    }
+
+    #[test]
+    fn link_url_round_trips_through_encode_and_decode() {
+        for url in [
+            "https://example.com/?a=1&b=2",
+            "https://mi.feishu.cn/wiki/Abc#frag",
+            "https://example.com/already%20encoded",
+            "mailto:someone@example.com",
+            "https://例子.cn/路径",
+        ] {
+            assert_eq!(percent_decode(&percent_encode_component(url)), url, "{url}");
+        }
+    }
+
+    #[test]
+    fn percent_decode_keeps_malformed_escapes() {
+        assert_eq!(percent_decode("100%"), "100%");
+        assert_eq!(percent_decode("%zz%4"), "%zz%4");
+        assert_eq!(percent_decode("%E4%B8"), "%E4%B8", "非法 UTF-8 退回原串");
+    }
+
+    #[test]
+    fn decode_text_run_link_is_url_decoded() {
+        let dict = json!({
+            "block_id": "B", "block_type": 2,
+            "text": { "elements": [ { "text_run": {
+                "content": "x",
+                "text_element_style": { "link": { "url": "https%3A%2F%2Fexample.com%2F%3Fa%3D1" } }
+            } } ] }
+        });
+        let block = decode_block_envelope(&dict).unwrap();
+        let Payload::Text(t) = block.payload else { panic!("期望文本") };
+        let TextElement::TextRun(run) = &t.elements[0];
+        assert_eq!(run.style.link.as_deref(), Some("https://example.com/?a=1"));
     }
 
     /// 附件(23):有 name 用 name 作标题,否则本地化兜底。

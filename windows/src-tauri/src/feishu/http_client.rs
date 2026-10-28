@@ -340,9 +340,16 @@ impl<T: FeishuTransport, P: AccessTokenProvider, S: BackoffSleeper> FeishuApi
     }
 
     async fn push_document(&self, document_id: &str, blocks: &[FeishuBlock]) -> Result<(), FeishuApiError> {
-        // 块编排「先删后建」:列现有根子块 → 范围删 → 一次 POST
-        // descendants。内部拉取只为找页块 + 根子块,revision 丢弃
-        // (但 meta 调用照发 — 对齐 Swift,请求序列可断言)。
+        // 块编排「先建后删」:列现有根子块 → 新正文追加到末尾(index -1)
+        // → 再删掉旧的 [0, n) 根子块。内部拉取只为找页块 + 根子块,
+        // revision 丢弃(meta 调用照发,请求序列可断言)。
+        //
+        // 刻意偏离 Swift 的「先删后建」(2026-10-19 真机 99992402):飞书
+        // 无事务 API,先删时只要 descendant POST 被校验器拒收,远端正文
+        // 就已被清空 — 推送失败直接变成数据丢失。先建后删把失败面翻过来:
+        // POST 失败 → 远端原样不动;POST 成功而删除失败 → 远端新旧并存
+        // (可见、可手工清理),都比静默清空安全。追加后旧块仍在 [0, n),
+        // 删除下标不受影响。
         let (existing, _revision) = self.pull_document(document_id).await?;
         let page = existing
             .iter()
@@ -350,11 +357,6 @@ impl<T: FeishuTransport, P: AccessTokenProvider, S: BackoffSleeper> FeishuApi
             .ok_or_else(|| FeishuApiError::DecodeFailed("pulled document has no page block".into()))?;
         let page_block_id = page.block_id.clone();
         let root_child_count = page.children.as_ref().map_or(0, |ids| ids.len());
-
-        if root_child_count > 0 {
-            self.delete_children_range(document_id, &page_block_id, 0, root_child_count)
-                .await?;
-        }
 
         let body = encoder::encode_descendant_body_at(blocks, -1)
             .map_err(|e| FeishuApiError::DecodeFailed(e.to_string()))?;
@@ -364,6 +366,11 @@ impl<T: FeishuTransport, P: AccessTokenProvider, S: BackoffSleeper> FeishuApi
             insert_descendants_request(&self.base_url, token, document_id, &parent, &body)
         })
         .await?;
+
+        if root_child_count > 0 {
+            self.delete_children_range(document_id, &page_block_id, 0, root_child_count)
+                .await?;
+        }
         Ok(())
     }
 
@@ -1033,10 +1040,9 @@ mod tests {
     // MARK: - pushDocument(先删后建编排)
 
     #[tokio::test]
-    async fn push_document_deletes_existing_then_posts_descendant() {
+    async fn push_document_posts_descendant_then_deletes_old_children() {
         // 一个现存根子块:push 依序发 pull blocks → meta →
-        // batch_delete → descendant。(内部拉取丢弃 revision,但
-        // meta 调用照发 — 请求序列可断言。)
+        // descendant(追加)→ batch_delete(删旧)。
         let transport = MockTransport::new(vec![
             ok(&blocks_page(
                 r#"{"block_id":"doc_target","block_type":1,"children":["bx_old"],"page":{"elements":[]}}"#,
@@ -1061,26 +1067,49 @@ mod tests {
         assert_eq!(recorded[1].method, "GET");
         assert_eq!(
             path(2),
-            "https://open.feishu.cn/open-apis/docx/v1/documents/doc_target/blocks/doc_target/children/batch_delete"
-        );
-        assert_eq!(recorded[2].method, "DELETE");
-        assert_eq!(
-            path(3),
             "https://open.feishu.cn/open-apis/docx/v1/documents/doc_target/blocks/doc_target/descendant"
         );
-        assert_eq!(recorded[3].method, "POST");
+        assert_eq!(recorded[2].method, "POST");
+        assert_eq!(
+            path(3),
+            "https://open.feishu.cn/open-apis/docx/v1/documents/doc_target/blocks/doc_target/children/batch_delete"
+        );
+        assert_eq!(recorded[3].method, "DELETE");
 
-        let delete_body: Value = serde_json::from_slice(&recorded[2].body).unwrap();
+        let desc_body: Value = serde_json::from_slice(&recorded[2].body).unwrap();
+        assert_eq!(desc_body["index"], -1, "新正文追加在旧块之后");
+        assert!(desc_body["children_id"].is_array());
+        assert!(desc_body["descendants"].is_array());
+
+        let delete_body: Value = serde_json::from_slice(&recorded[3].body).unwrap();
         assert_eq!(delete_body["start_index"], 0);
         assert_eq!(
             delete_body["end_index"], 1,
-            "end_index 必须等于现存根子块数"
+            "end_index 必须等于推送前的根子块数(旧块仍在 [0, n))"
         );
+    }
 
-        let desc_body: Value = serde_json::from_slice(&recorded[3].body).unwrap();
-        assert_eq!(desc_body["index"], -1);
-        assert!(desc_body["children_id"].is_array());
-        assert!(desc_body["descendants"].is_array());
+    #[tokio::test]
+    async fn push_document_rejected_post_leaves_remote_untouched() {
+        // 2026-10-19 真机回归:校验器拒收 descendant(99992402)时,
+        // 绝不能已经删掉远端正文。断言:POST 失败后不再发 batch_delete。
+        let transport = MockTransport::new(vec![
+            ok(&blocks_page(
+                r#"{"block_id":"doc_target","block_type":1,"children":["bx_old"],"page":{"elements":[]}}"#,
+                false,
+                None,
+            )),
+            ok(&meta_doc(1)),
+            resp(400, r#"{"code":99992402,"msg":"field validation failed"}"#),
+        ]);
+        let api = make_api(transport.clone(), StaticTokens("T"));
+        let blocks = crate::feishu::converter::to_feishu_blocks("# Hello\n");
+
+        let err = api.push_document("doc_target", &blocks).await.unwrap_err();
+        assert!(matches!(err, FeishuApiError::BadRequest { code: Some(99992402), .. }));
+        let recorded = transport.recorded();
+        assert_eq!(recorded.len(), 3, "POST 失败后不得再发删除");
+        assert!(recorded.iter().all(|r| r.method != "DELETE"));
     }
 
     #[tokio::test]
